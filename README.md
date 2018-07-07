@@ -1,6 +1,6 @@
 # Binary sensor for [ha-dockermon](https://github.com/philhawthorne/ha-dockermon)
   
-[![Version](https://img.shields.io/badge/version-0.0.1-green.svg?style=for-the-badge)](#) [![mantained](https://img.shields.io/maintenance/yes/2018.svg?style=for-the-badge)](#) [![maintainer](https://img.shields.io/badge/maintainer-Joakim%20Sørensen%20%40ludeeus-blue.svg?style=for-the-badge)](#)   
+[![Version](https://img.shields.io/badge/version-0.0.2-green.svg?style=for-the-badge)](#) [![mantained](https://img.shields.io/maintenance/yes/2018.svg?style=for-the-badge)](#) [![maintainer](https://img.shields.io/badge/maintainer-Joakim%20Sørensen%20%40ludeeus-blue.svg?style=for-the-badge)](#)   
 A custom binary_sensor platform which allows you get sensor data from [ha-dockermon.](https://github.com/philhawthorne/ha-dockermon)
 
 This platform will **only** give you sensor data, if you also want to controll the containers as switches have a look at [switch.hadockermon](https://github.com/custom-components/switch.hadockermon)  
