@@ -4,8 +4,8 @@ A custom binary_sensor platform which allows you get sensor data from [ha-docker
 
 This platform will **only** give you sensor data, if you also want to controll the containers as switches have a look at [switch.hadockermon](https://github.com/custom-components/switch.hadockermon)  
   
-To get started put `/custom_components/binary_sensor/hadockermon.py` here:  
-`<config directory>/custom_components/binary_sensor/hadockermon.py`  
+To get started put `/custom_components/hadockermon/binary_sensor.py` here:  
+`<config directory>/custom_components/hadockermon/binary_sensor.py`  
   
 **Example configuration.yaml:**
 ```yaml
