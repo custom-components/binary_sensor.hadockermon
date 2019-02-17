@@ -7,23 +7,25 @@ https://github.com/custom-components/binary_sensor.hadockermon
 '''
 import logging
 import voluptuous as vol
+from homeassistant.const import (CONF_HOST, CONF_PORT, CONF_NAME,
+                                 CONF_USERNAME, CONF_PASSWORD,
+                                 CONF_SSL, CONF_VERIFY_SSL)
 import homeassistant.helpers.config_validation as cv
-from time import sleep
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from datetime import timedelta
-from homeassistant.core import ServiceCall
-from homeassistant.util import slugify
 from homeassistant.components.binary_sensor import (PLATFORM_SCHEMA,
-    BinarySensorDevice, ENTITY_ID_FORMAT)
+                                                    BinarySensorDevice)
 
 __version__ = '0.0.3'
 
-REQUIREMENTS = ['pydockermon==0.0.1']
+_LOGGER = logging.getLogger(__name__)
 
-CONF_HOST = 'host'
-CONF_PORT = 'port'
+REQUIREMENTS = ['pydockermon==1.0.0']
+DEFAULT_NAME = 'HA Dockermon'
+CONTAINER_NAME = '{} {}'
+
+CONF_CONTAINERS = 'containers'
 CONF_STATS = 'stats'
-CONF_PREFIX = 'prefix'
-CONF_EXCLUDE = 'exclude'
 
 ATTR_STATUS = 'status'
 ATTR_IMAGE = 'image'
@@ -37,47 +39,56 @@ SCAN_INTERVAL = timedelta(seconds=60)
 
 ICON = 'mdi:docker'
 
-_LOGGER = logging.getLogger(__name__)
-
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string,
-    vol.Optional(CONF_PORT, default='8126'): cv.string,
+    vol.Required(CONF_PORT, default=8126): cv.port,
+    vol.Optional(CONF_NAME): cv.string,
     vol.Optional(CONF_STATS, default='False'): cv.string,
-    vol.Optional(CONF_PREFIX, default='None'): cv.string,
-    vol.Optional(CONF_EXCLUDE, default=None): 
+    vol.Optional(CONF_USERNAME): cv.string,
+    vol.Optional(CONF_PASSWORD): cv.string,
+    vol.Optional(CONF_SSL, default=False): cv.boolean,
+    vol.Optional(CONF_VERIFY_SSL, default=False): cv.boolean,
+    vol.Optional(CONF_CONTAINERS, default=None):
         vol.All(cv.ensure_list, [cv.string]),
 })
 
-def setup_platform(hass, config, add_devices_callback, discovery_info=None):
-    from pydockermon import Dockermon
-    dm = Dockermon()
-    host = config.get(CONF_HOST)
-    port = config.get(CONF_PORT)
-    exclude = config.get(CONF_EXCLUDE)
-    stats = config.get(CONF_STATS)
-    prefix = config.get(CONF_PREFIX)
-    dev = []
-    containers = dm.listContainers(host)
-    if containers:
-        for container in containers:
-            containername = container['Names'][0][1:]
-            if containername not in exclude:
-                dev.append(ContainerBinarySensor(containername,
-                    False, stats, host, port , dm, prefix))
-        add_devices_callback(dev, True)
-    else:
-        return False
 
-class ContainerBinarySensor(BinarySensorDevice):
-    def __init__(self, name, state, stats, host, port, dm, prefix):
-        _slow_reported = True
-        if prefix == 'None':
-            self.entity_id = ENTITY_ID_FORMAT.format(slugify(name))
-        else:
-            self.entity_id = ENTITY_ID_FORMAT.format(slugify(prefix + '_' + name))
-        self._dm = dm
-        self._state = False
-        self._name = name
+async def async_setup_platform(hass, config, async_add_entities,
+                               discovery_info=None):
+    """Set up the device."""
+    from pydockermon.api import API
+
+    host = config[CONF_HOST]
+    port = config[CONF_PORT]
+    username = config.get(CONF_USERNAME)
+    password = config.get(CONF_PASSWORD)
+    ssl = config[CONF_SSL]
+    verify_ssl = config[CONF_VERIFY_SSL]
+    device_name = config.get(CONF_NAME)
+    stats = config.get(CONF_STATS)
+    containers = config[CONF_CONTAINERS]
+    session = async_get_clientsession(hass, verify_ssl)
+    api = API(hass.loop, session, host, port, username, password, ssl)
+    devices = []
+    await api.list_containers()
+    for container in api.all_containers['data']:
+        if not containers or container in containers:
+            if not container.startswith("addon_"):
+                devices.append(HADockermonSwitch(api, device_name, stats,
+                                                 container, host))
+
+    async_add_entities(devices, True)
+
+
+class HADockermonSwitch(BinarySensorDevice):
+    def __init__(self, api, device_name, stats, container, host):
+        self.api = api
+        self.container = container
+
+        if not device_name:
+            device_name = DEFAULT_NAME
+        self.device_name = CONTAINER_NAME.format(device_name, container)
+
         self._stats = stats
         self._network_stats = None
         self._status = None
@@ -86,61 +97,58 @@ class ContainerBinarySensor(BinarySensorDevice):
         self._network_rx_total = None
         self._network_tx_total = None
         self._host = host
-        self._port = port
 
-    def update(self):
-        containerstate = self._dm.getContainerState(self._name,
-            self._host, self._port)
-        if containerstate == False:
-            self._state = False
-        else:
-            state = containerstate['state']
-            self._status = containerstate['status']
-            self._image = containerstate['image']
-            if state == 'running':
-                if self._stats == 'True':
-                    containerstats = self._dm.getContainerStats(self._name,
-                        self._host, self._port)
-                    if containerstats == False:
-                        return False
-                    else:
-                        get_memory = containerstats['memory_stats']
-                        memory_usage = get_memory['usage']/1024/1024
-                        try:
-                            containerstats['networks']
-                        except Exception:
-                            self._network_rx_total = None
-                            self._network_tx_total = None
-                        else:
-                            self._network_stats = 'aviable'
-                            netstats = containerstats['networks']['eth0']
-                            network_rx_total = netstats['rx_bytes']/1024/1024
-                            network_tx_total = netstats['tx_bytes']/1024/1024
-                            self._network_rx_total = str(round(
-                                network_rx_total, 2)) + ' MB'
-                            self._network_tx_total = str(round(
-                                network_tx_total, 2)) + ' MB'
-                        self._memory_usage = str(round(
-                            memory_usage, 2)) + ' MB'
-                self._state = True
-            else:
-                self._state = False
+    async def async_update(self):
+        state = await self.api.container_state(self.container)
+        try:
+            self._state = state['data']['state']
+        except (TypeError, KeyError):
+            _LOGGER.debug("Could not fetch state for %s", self.container)
+        try:
+            self._status = state['data']['status']
+        except (TypeError, KeyError):
+            _LOGGER.debug("Could not fetch status for %s", self.container)
+        try:
+            self._image = state['data']['image']
+        except (TypeError, KeyError):
+            _LOGGER.debug("Could not fetch image for %s", self.container)
+
+        if self._state == 'running' and self._stats:
+            metrics = await self.api.container_metrics(self.container)
+            try:
+                data = metrics['data']
+            except (TypeError, KeyError):
+                _LOGGER.debug("Could not fetch metrics for %s", self.container)
+
+            if data:
+                memory_usage = data['memory_stats']['usage']/1024/1024
+                self._memory_usage = str(round(memory_usage, 2)) + 'MB'
+
+                if 'networks' in data:
+                    self._network_stats = 'available'
+                    stats_eth0 = data['networks']['eth0']
+                    net_rx_total = stats_eth0['rx_bytes']/1024/1024
+                    net_tx_total = stats_eth0['tx_bytes']/1024/1024
+                    self._network_rx_total = str(round(net_rx_total, 2)) + 'MB'
+                    self._network_tx_total = str(round(net_tx_total, 2)) + 'MB'
+
 
     @property
     def name(self):
         """Return the name of the binary_sensor."""
-        return self._name
+        return self.device_name
 
     @property
     def is_on(self):
         """Return the state of the binary sensor."""
-        return self._state
+        if self._state == 'running':
+            return True
+        return False
 
     @property
     def device_class(self):
         """Return the class of this device, from component DEVICE_CLASSES."""
-        return 'connectivity'
-
+        return 'power'
 
     @property
     def icon(self):
@@ -149,22 +157,17 @@ class ContainerBinarySensor(BinarySensorDevice):
 
     @property
     def device_state_attributes(self):
-        if self._network_stats == 'aviable':
-            return {
-                ATTR_STATUS: self._status,
-                ATTR_IMAGE: self._image,
-                ATTR_MEMORY: self._memory_usage,
+        ret = {
+            ATTR_STATUS: self._status,
+            ATTR_IMAGE: self._image,
+        }
+        if self._stats:
+            ret.update({ATTR_MEMORY: self._memory_usage})
+
+        if self._network_stats:
+            ret.update({
                 ATTR_RX_TOTAL: self._network_rx_total,
                 ATTR_TX_TOTAL: self._network_tx_total,
-            }
-        elif self._stats == 'True':
-            return {
-                ATTR_STATUS: self._status,
-                ATTR_IMAGE: self._image,
-                ATTR_MEMORY: self._memory_usage,
-            }
-        else: 
-            return {
-                ATTR_STATUS: self._status,
-                ATTR_IMAGE: self._image,
-            }
+            })
+
+        return ret

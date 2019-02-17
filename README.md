@@ -14,8 +14,8 @@ binary_sensor:
   host: 192.168.1.50
   port: 8126
   stats: true
-  prefix: hadockermon
-  exclude:
+  device_name: hadockermon
+  containers:
     - 'NGINX'
     - 'ha-dockermon'
 ```
@@ -27,8 +27,8 @@ key | description
 **host (Required)** | The IP address of your Docker host.  
 **port (Optional)** | The port that the service is exposed on.  
 **stats (Optional)** | Show memory and network usage of the containers, this does _not_ work on every docker host.  
-**prefix (Optional)** | A string that will prefix the entity name, for easy sort and grouping.  
-**exclude (Optional)** | A list of Docker containers you want to exclude.  
+**device_name (Optional)** | A string that will prefix the entity name, for easy sort and grouping.  
+**containers (Optional)** | A list of Docker containers you want to show, by default it shows all.
   
 #### Sample overview
 ![Sample overview](overview.png)
